@@ -1,0 +1,35 @@
+<UserControl x:Class="ReportGenerator.Views.HeaderControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:ReportGenerator.Views"
+             Height="56">
+    <Border Style="{StaticResource AppHeader}">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left: App icon from provided image -->
+            <Image Source="/ReportGenerator;component/Resources/FactoryLogo.png"
+                   Width="40"
+                   Height="40"
+                   Margin="10,0,8,0"
+                   VerticalAlignment="Center"
+                   Stretch="Uniform"/>
+
+            <!-- Center: view/window title or selected table -->
+            <TextBlock Grid.Column="1" Style="{StaticResource HeaderTitleText}" Text="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=Title, FallbackValue=''}"
+                 HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+            <!-- Right: Close button -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="8,0,0,0">
+                <!-- Optionally add minimize/other controls here -->
+                <Button Style="{StaticResource CircularCloseButton}" Margin="6,0" Click="CloseButton_Click">
+                    <TextBlock Text="✕" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                </Button>
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

@@ -1,0 +1,18 @@
+# Visual Studio / .NET typical ignores
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+packages/
+*.nupkg
+*.cache
+TestResults/
+*.log
+.vscode/
+*.db
+Thumbs.db
+*.ide.*
+*.DS_Store
