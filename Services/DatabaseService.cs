@@ -71,7 +71,7 @@ namespace ReportGenerator.Services
             return list;
         }
 
-        public async Task<DataTable> GetColumnDataAsync(string schema, string table, string column, int top = 500)
+        public async Task<DataTable> GetColumnDataAsync(string schema, string table, string column, int top = 10000000)
         {
             var dt = new DataTable();
             string esc(string s) => s.Replace("]", "]]");
@@ -92,7 +92,7 @@ namespace ReportGenerator.Services
             return dt;
         }
 
-        public async Task<DataTable> GetColumnsDataAsync(string schema, string table, IEnumerable<string> columns, int top = 500)
+        public async Task<DataTable> GetColumnsDataAsync(string schema, string table, IEnumerable<string> columns, int top = 10000000)
         {
             var cols = columns?.ToList() ?? new List<string>();
             if (cols.Count == 0) return new DataTable();

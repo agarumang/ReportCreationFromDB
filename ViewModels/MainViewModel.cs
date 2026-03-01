@@ -1,17 +1,25 @@
-﻿using ReportGenerator.Helpers;
+﻿using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
+using Microsoft.Win32;
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
+using QuestPDF.Infrastructure;
+using ReportGenerator.Helpers;
 using ReportGenerator.Services;
 using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Data;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
-using Microsoft.Win32;
-using ClosedXML.Excel;
+using Colors = QuestPDF.Helpers.Colors;
 
 namespace ReportGenerator.ViewModels
 {
@@ -21,7 +29,7 @@ namespace ReportGenerator.ViewModels
 
         public ObservableCollection<string> Tables { get; } = new ObservableCollection<string>();
         public ObservableCollection<ColumnItem> Columns { get; } = new ObservableCollection<ColumnItem>();
-        public ObservableCollection<string> ExportFormats { get; } = new ObservableCollection<string> { "Excel", "CSV" };
+        public ObservableCollection<string> ExportFormats { get; } = new ObservableCollection<string> { "Excel", "CSV", "PDF" };
 
         private string _selectedExportFormat = "Excel";
         public string SelectedExportFormat
@@ -133,8 +141,10 @@ namespace ReportGenerator.ViewModels
                     Tables.Clear();
                     foreach (var t in tables)
                     {
-                        if (firstTable == null) firstTable = t;
-                        Tables.Add(t);
+                        string tableName = t.StartsWith("dbo.", StringComparison.OrdinalIgnoreCase)
+                            ? t.Substring(4) : t;
+                        if (firstTable == null) firstTable = tableName;
+                        Tables.Add(tableName);
                     }
                     Columns.Clear();
                     Results = null;
@@ -203,7 +213,7 @@ namespace ReportGenerator.ViewModels
 
                 try
                 {
-                    var dt = await _db.GetColumnsDataAsync(schema, table, selected, 500);
+                    var dt = await _db.GetColumnsDataAsync(schema, table, selected, 100000000);
                     Results = dt?.DefaultView;
                 }
                 catch (Exception ex)
@@ -268,17 +278,17 @@ namespace ReportGenerator.ViewModels
                 return;
             }
 
-            var message = SelectedExportFormat == "Excel" ? "Exporting report to Excel..." : "Exporting report to CSV...";
+            var message = SelectedExportFormat == "Excel" ? "Exporting report to Excel..." : SelectedExportFormat == "PDF" ? "Exporting report to PDF..." : "Exporting report to CSV...";
 
             await RunWithLoading(message, async () =>
             {
                 if (SelectedExportFormat == "Excel")
                 {
-                    await ExportResultsToExcelAsync();
+                    await ExportHugeExcelDataAsync();
                 }
-                else if(SelectedExportFormat == "PDF")
+                else if (SelectedExportFormat == "PDF")
                 {
-                   // await ExportResultsToPDFAsync();
+                    await ExportResultsToPDFAsync();
                 }
                 else
                 {
@@ -287,55 +297,271 @@ namespace ReportGenerator.ViewModels
             });
         }
 
+        private string ResolveLogoToTempFile()
+        {
+            // 1) check output folder common locations
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            var candidates = new[]
+            {
+                Path.Combine(baseDir, "logo.png"),
+                Path.Combine(baseDir, "Resources", "FactoryLogo.png"),
+                Path.Combine(baseDir, "Resources", "FactoryLogo.PNG"),
+                Path.Combine(baseDir, "Resources", "factorylogo.png")
+            };
+
+            foreach (var c in candidates)
+            {
+                try { if (File.Exists(c)) return c; } catch { }
+            }
+
+            // 2) try pack URI (WPF Resource)
+            try
+            {
+                var packUri = new Uri("pack://application:,,,/Resources/FactoryLogo.png", UriKind.Absolute);
+                var info = Application.GetResourceStream(packUri);
+                if (info?.Stream != null)
+                {
+                    var temp = Path.Combine(Path.GetTempPath(), $"FactoryLogo_{Guid.NewGuid()}.png");
+                    using (var fs = File.Create(temp))
+                    {
+                        info.Stream.CopyTo(fs);
+                    }
+                    return temp;
+                }
+            }
+            catch
+            {
+                // ignore and continue to embedded resource attempt
+            }
+
+            // 3) try assembly manifest resource (if build action EmbeddedResource)
+            try
+            {
+                var asm = Assembly.GetExecutingAssembly();
+                var name = asm.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith("FactoryLogo.png", StringComparison.OrdinalIgnoreCase));
+                if (name != null)
+                {
+                    using (var s = asm.GetManifestResourceStream(name))
+                    {
+                        if (s != null)
+                        {
+                            var temp = Path.Combine(Path.GetTempPath(), $"FactoryLogo_{Guid.NewGuid()}.png");
+                            using (var fs = File.Create(temp)) s.CopyTo(fs);
+                            return temp;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private async Task ExportResultsToPDFAsync()
+        {
+            if (Results == null || Results.Table == null ||
+                Results.Table.Columns.Count == 0 ||
+                Results.Table.Rows.Count == 0)
+            {
+                MessageBox.Show("No data to export.", "Export",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var dlg = new SaveFileDialog
+            {
+                Filter = "PDF files (*.pdf)|*.pdf|All files (*.*)|*.*",
+                FileName = $"{(SelectedTable ?? "report").Replace('.', '_')}_{DateTime.Now:yyyyMMddHHmmss}.pdf",
+                DefaultExt = ".pdf"
+            };
+
+            if (dlg.ShowDialog() != true)
+                return;
+
+            var table = Results.Table.Copy(); // Important for threading safety
+            var filePath = dlg.FileName;
+
+            string tempLogoPath = null;
+
+            try
+            {
+                tempLogoPath = ResolveLogoToTempFile();
+
+                await Task.Run(() =>
+                {
+                    QuestPDF.Settings.License = LicenseType.Community;
+
+                    Document.Create(container =>
+                    {
+                        container.Page(page =>
+                        {
+                            page.Size(PageSizes.A4.Landscape());
+                            page.Margin(25);
+
+                            // ================= HEADER =================
+                            page.Header().Column(header =>
+                            {
+                                if (!string.IsNullOrWhiteSpace(tempLogoPath) && File.Exists(tempLogoPath))
+                                {
+                                    header.Item()
+                                          .AlignCenter()
+                                          .Height(60)
+                                          .Image(tempLogoPath)
+                                          .FitHeight();
+                                }
+
+                                header.Item()
+                                      .AlignCenter()
+                                      .Text(SelectedTable ?? "Report")
+                                      .FontSize(18)
+                                      .Bold();
+
+                                string startDate = FromDate?.ToString("dd-MMM-yyyy") ?? "N/A";
+                                string endDate = ToDate?.ToString("dd-MMM-yyyy") ?? "N/A";
+
+                                header.Item()
+                                      .AlignCenter()
+                                      .Text($"Start Date: {startDate}   |   End Date: {endDate}")
+                                      .FontSize(10);
+
+                                header.Item().PaddingBottom(10);
+                            });
+
+                            // ================= TABLE CONTENT =================
+                            page.Content().Table(tableLayout =>
+                            {
+                                // Define columns
+                                tableLayout.ColumnsDefinition(columns =>
+                                {
+                                    for (int i = 0; i < table.Columns.Count; i++)
+                                        columns.RelativeColumn();
+                                });
+
+                                // ===== REPEATING HEADER =====
+                                tableLayout.Header(header =>
+                                {
+                                    foreach (DataColumn column in table.Columns)
+                                    {
+                                        header.Cell()
+                                              .Background(Colors.Grey.Lighten2)
+                                              .Border(1)
+                                              .Padding(5)
+                                              .Text(column.ColumnName)
+                                              .Bold()
+                                              .FontSize(10);
+                                    }
+                                });
+
+                                // ===== DATA ROWS =====
+                                foreach (DataRow row in table.Rows)
+                                {
+                                    foreach (var cell in row.ItemArray)
+                                    {
+                                        tableLayout.Cell()
+                                            .Border(1)
+                                            .Padding(5)
+                                            .Text(cell?.ToString() ?? "")
+                                            .FontSize(9);
+                                    }
+                                }
+                            });
+
+                            // ================= FOOTER =================
+                            page.Footer().Row(footer =>
+                            {
+                                footer.RelativeItem()
+                                      .AlignLeft()
+                                      .Text($"Generated on {DateTime.Now:dd-MMM-yyyy HH:mm:ss}")
+                                      .FontSize(8);
+
+                                footer.RelativeItem()
+                                      .AlignRight()
+                                      .Text(x =>
+                                      {
+                                          x.Span("Page ").FontSize(8);
+                                          x.CurrentPageNumber().FontSize(8);
+                                          x.Span(" of ").FontSize(8);
+                                          x.TotalPages().FontSize(8);
+                                      });
+                            });
+                        });
+                    })
+                    .GeneratePdf(filePath);
+                });
+
+                MessageBox.Show(
+                    $"Export complete. {table.Rows.Count} records exported to:{Environment.NewLine}{filePath}",
+                    "Export",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Export failed: {ex.Message}",
+                    "Export",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(tempLogoPath) &&
+                        tempLogoPath.StartsWith(Path.GetTempPath()) &&
+                        File.Exists(tempLogoPath))
+                    {
+                        File.Delete(tempLogoPath);
+                    }
+                }
+                catch { }
+            }
+        }
 
         private async Task ExportResultsToCsvAsync()
         {
-            if (Results == null || Results.Table == null || Results.Table.Columns.Count == 0 || Results.Table.Rows.Count == 0)
-            {
-                MessageBox.Show("No data to export.", "Export", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            var dlg = new SaveFileDialog
-            {
-                Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*",
-                FileName = $"{(SelectedTable ?? "data").Replace('.', '_')}_{DateTime.Now:yyyyMMddHHmmss}.csv",
-                DefaultExt = ".csv"
-            };
-
-            if (dlg.ShowDialog() != true) return;
-
-            var table = Results.Table;
-            var filePath = dlg.FileName;
-
             try
             {
-                await RunWithLoading("Exporting report to CSV...", async () =>
+                if (Results?.Table == null || Results.Table.Rows.Count == 0)
                 {
-                    await Task.Run(() =>
+                    MessageBox.Show("No data to export.");
+                    return;
+                }
+
+                var dlg = new SaveFileDialog
+                {
+                    Filter = "CSV files (*.csv)|*.csv",
+                    FileName = $"{(SelectedTable ?? "data").Replace('.', '_')}_{DateTime.Now:yyyyMMddHHmmss}.csv",
+                };
+
+                if (dlg.ShowDialog() != true)
+                    return;
+
+                var table = Results.Table.Copy(); // IMPORTANT
+                var filePath = dlg.FileName;
+
+                await Task.Run(() =>
+                {
+                    using (var sw = new StreamWriter(filePath, false, new UTF8Encoding(true)))
                     {
-                        using (var sw = new StreamWriter(filePath, false, new UTF8Encoding(true)))
+                        // header
+                        for (int i = 0; i < table.Columns.Count; i++)
                         {
-                            // header
+                            if (i > 0) sw.Write(",");
+                            sw.Write(table.Columns[i].ColumnName);
+                        }
+                        sw.WriteLine();
+
+                        // rows
+                        foreach (DataRow row in table.Rows)
+                        {
                             for (int i = 0; i < table.Columns.Count; i++)
                             {
                                 if (i > 0) sw.Write(",");
-                                sw.Write(Escape(table.Columns[i].ColumnName));
+                                sw.Write(row[i]?.ToString());
                             }
                             sw.WriteLine();
-
-                            // rows
-                            foreach (DataRow row in table.Rows)
-                            {
-                                for (int i = 0; i < table.Columns.Count; i++)
-                                {
-                                    if (i > 0) sw.Write(",");
-                                    sw.Write(Escape(row[i]));
-                                }
-                                sw.WriteLine();
-                            }
                         }
-                    });
+                    }
                 });
 
                 var exportedCount = table.Rows.Count;
@@ -343,80 +569,124 @@ namespace ReportGenerator.ViewModels
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Export failed: {ex.Message}", "Export", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(ex.ToString());
             }
         }
 
-        private async Task ExportResultsToExcelAsync()
+        private async Task ExportHugeExcelDataAsync()
         {
-            if (Results == null || Results.Table == null || Results.Table.Columns.Count == 0 || Results.Table.Rows.Count == 0)
-            {
-                MessageBox.Show("No data to export.", "Export", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            var dlg = new SaveFileDialog
-            {
-                Filter = "Excel Workbook (*.xlsx)|*.xlsx|All files (*.*)|*.*",
-                FileName = $"{(SelectedTable ?? "data").Replace('.', '_')}_{DateTime.Now:yyyyMMddHHmmss}.xlsx",
-                DefaultExt = ".xlsx"
-            };
-
-            if (dlg.ShowDialog() != true) return;
-
-            var table = Results.Table;
-            var filePath = dlg.FileName;
-
             try
             {
-                await RunWithLoading("Exporting report to Excel...", async () =>
+                if (Results?.Table == null || Results.Table.Rows.Count == 0)
                 {
-                    await Task.Run(() =>
+                    MessageBox.Show("No data to export.");
+                    return;
+                }
+
+                var dlg = new SaveFileDialog
+                {
+                    Filter = "Excel Workbook (*.xlsx)|*.xlsx",
+                    FileName = $"{(SelectedTable ?? "data").Replace('.', '_')}_{DateTime.Now:yyyyMMddHHmmss}.xlsx",
+                };
+
+                if (dlg.ShowDialog() != true)
+                    return;
+
+                string filePath = dlg.FileName;
+                var table = Results.Table;
+
+                await Task.Run(() =>
+                {
+                    const int MaxRowsPerSheet = 1048575; // Excel limit minus header
+
+                    using (SpreadsheetDocument document =
+                        SpreadsheetDocument.Create(filePath, SpreadsheetDocumentType.Workbook))
                     {
-                        const int ExcelMaxRows = 1_048_576;
-                        int maxDataRowsPerSheet = ExcelMaxRows - 1; // reserve one row for header
+                        WorkbookPart workbookPart = document.AddWorkbookPart();
+                        workbookPart.Workbook = new Workbook();
+                        Sheets sheets = workbookPart.Workbook.AppendChild(new Sheets());
+
                         int totalRows = table.Rows.Count;
-                        int totalSheets = (int)Math.Ceiling(totalRows / (double)maxDataRowsPerSheet);
+                        int sheetCount = (int)Math.Ceiling(totalRows / (double)MaxRowsPerSheet);
 
-                        using (var wb = new XLWorkbook())
+                        for (int s = 0; s < sheetCount; s++)
                         {
-                            var baseSheetName = "Data";
-                            for (int s = 0; s < totalSheets; s++)
-                            {
-                                int start = s * maxDataRowsPerSheet;
-                                int count = Math.Min(maxDataRowsPerSheet, totalRows - start);
+                            WorksheetPart worksheetPart =
+                                workbookPart.AddNewPart<WorksheetPart>();
 
-                                // clone schema and import the chunk of rows
-                                var chunk = table.Clone();
-                                for (int i = 0; i < count; i++)
+                            using (OpenXmlWriter writer = OpenXmlWriter.Create(worksheetPart))
+                            {
+                                writer.WriteStartElement(new Worksheet());
+                                writer.WriteStartElement(new SheetData());
+
+                                uint currentExcelRow = 1;
+
+                                // ===== WRITE HEADER =====
+                                writer.WriteStartElement(new Row { RowIndex = currentExcelRow });
+
+                                foreach (DataColumn col in table.Columns)
                                 {
-                                    chunk.ImportRow(table.Rows[start + i]);
+                                    writer.WriteElement(new Cell
+                                    {
+                                        DataType = CellValues.InlineString,
+                                        InlineString = new InlineString(
+                                            new Text(col.ColumnName ?? ""))
+                                    });
                                 }
 
-                                // build safe sheet name (no invalid chars, <=31 chars)
-                                string sheetName = totalSheets == 1 ? baseSheetName : $"{baseSheetName}_{s + 1}";
-                                var invalid = new[] { ':', '\\', '/', '?', '*', '[', ']' };
-                                foreach (var c in invalid) sheetName = sheetName.Replace(c, '_');
-                                if (sheetName.Length > 31) sheetName = sheetName.Substring(0, 31);
+                                writer.WriteEndElement(); // Header row
+                                currentExcelRow++;
 
-                                var ws = wb.Worksheets.Add(chunk, sheetName);
-                                ws.ColumnsUsed().AdjustToContents();
+                                // ===== WRITE DATA =====
+                                int startRow = s * MaxRowsPerSheet;
+                                int endRow = Math.Min(startRow + MaxRowsPerSheet, totalRows);
+
+                                for (int i = startRow; i < endRow; i++)
+                                {
+                                    writer.WriteStartElement(new Row { RowIndex = currentExcelRow });
+
+                                    foreach (var item in table.Rows[i].ItemArray)
+                                    {
+                                        writer.WriteElement(new Cell
+                                        {
+                                            DataType = CellValues.InlineString,
+                                            InlineString = new InlineString(
+                                                new Text(item?.ToString() ?? ""))
+                                        });
+                                    }
+
+                                    writer.WriteEndElement(); // Data row
+                                    currentExcelRow++;
+                                }
+
+                                writer.WriteEndElement(); // SheetData
+                                writer.WriteEndElement(); // Worksheet
                             }
 
-                            wb.SaveAs(filePath);
+                            sheets.Append(new Sheet
+                            {
+                                Id = workbookPart.GetIdOfPart(worksheetPart),
+                                SheetId = (uint)(s + 1),
+                                Name = $"Sheet{s + 1}"
+                            });
                         }
-                    });
+
+                        workbookPart.Workbook.Save();
+                    }
                 });
 
                 var exportedCount = table.Rows.Count;
                 MessageBox.Show($"Export complete. {exportedCount} records exported to:{Environment.NewLine}{filePath}", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
+                Process.Start(new ProcessStartInfo(filePath)
+                {
+                    UseShellExecute = true
+                });
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Export failed: {ex.Message}", "Export", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"Export failed:\n{ex.Message}");
             }
         }
-
         private static string Escape(object value)
         {
             if (value == null || value == DBNull.Value) return string.Empty;
