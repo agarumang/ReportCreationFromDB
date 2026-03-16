@@ -1,4 +1,5 @@
-﻿using DocumentFormat.OpenXml;
+﻿using ClosedXML.Excel;
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using Microsoft.Win32;
@@ -10,6 +11,7 @@ using ReportGenerator.Services;
 using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Configuration;
 using System.Data;
 using System.Diagnostics;
 using System.IO;
@@ -18,7 +20,7 @@ using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Input;
+using System.Windows.Input; 
 using Colors = QuestPDF.Helpers.Colors;
 
 namespace ReportGenerator.ViewModels
@@ -93,6 +95,9 @@ namespace ReportGenerator.ViewModels
         public ICommand ClearColumnsCommand { get; }
         public ICommand ExportCommand { get; }
 
+        // Resolved logo path (automatically sourced from application folder/resources/embedded)
+        public string LogoPath { get; }
+
         public MainViewModel(IDatabaseService db)
         {
             _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -102,6 +107,9 @@ namespace ReportGenerator.ViewModels
             SelectAllColumnsCommand = new RelayCommand(_ => SelectAllColumns());
             ClearColumnsCommand = new RelayCommand(_ => ClearAllColumns());
             ExportCommand = new RelayCommand(async _ => await ExportResultsAsync());
+
+            // Resolve logo once at startup from exe folder / resources / embedded resource.
+            LogoPath = ResolveLogoToTempFile();
 
             // sensible defaults
             ToDate = DateTime.Today.AddDays(1).Date; // include today until end
@@ -299,19 +307,44 @@ namespace ReportGenerator.ViewModels
 
         private string ResolveLogoToTempFile()
         {
-            // 1) check output folder common locations
-            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            var candidates = new[]
-            {
-                Path.Combine(baseDir, "logo.png"),
-                Path.Combine(baseDir, "Resources", "FactoryLogo.png"),
-                Path.Combine(baseDir, "Resources", "FactoryLogo.PNG"),
-                Path.Combine(baseDir, "Resources", "factorylogo.png")
-            };
+            // Read configuration first: supports "LogoCandidates" (semicolon-separated)
+            // or a single "LogoPath". Relative paths are resolved against the app base dir.
+            string configured = ConfigurationManager.AppSettings["LogoPath"];
 
+            var candidates = new System.Collections.Generic.List<string>();
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+
+            if (!string.IsNullOrWhiteSpace(configured))
+            {
+                var parts = configured.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+                                      .Select(p => p.Trim());
+                foreach (var p in parts)
+                {
+                    if (string.IsNullOrWhiteSpace(p)) continue;
+                    try
+                    {
+                        candidates.Add(Path.IsPathRooted(p) ? p : Path.Combine(baseDir, p));
+                    }
+                    catch { /* skip invalid entries */ }
+                }
+            }
+            else
+            {
+                // original default candidate files (relative to exe)
+                candidates.Add(Path.Combine(baseDir, "logo.png"));
+                candidates.Add(Path.Combine(baseDir, "Resources", "FactoryLogo.png"));
+                candidates.Add(Path.Combine(baseDir, "Resources", "FactoryLogo.PNG"));
+                candidates.Add(Path.Combine(baseDir, "Resources", "factorylogo.png"));
+            }
+
+            // Check file-system candidates first
             foreach (var c in candidates)
             {
-                try { if (File.Exists(c)) return c; } catch { }
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(c) && File.Exists(c)) return c;
+                }
+                catch { }
             }
 
             // 2) try pack URI (WPF Resource)
@@ -385,7 +418,7 @@ namespace ReportGenerator.ViewModels
 
             try
             {
-                tempLogoPath = ResolveLogoToTempFile();
+                tempLogoPath = LogoPath; // already resolved
 
                 await Task.Run(() =>
                 {
@@ -506,11 +539,12 @@ namespace ReportGenerator.ViewModels
             {
                 try
                 {
-                    if (!string.IsNullOrWhiteSpace(tempLogoPath) &&
-                        tempLogoPath.StartsWith(Path.GetTempPath()) &&
-                        File.Exists(tempLogoPath))
+                    // only delete temp logo files we created (those in TempPath)
+                    if (!string.IsNullOrWhiteSpace(LogoPath) &&
+                        LogoPath.StartsWith(Path.GetTempPath()) &&
+                        File.Exists(LogoPath))
                     {
-                        File.Delete(tempLogoPath);
+                        File.Delete(LogoPath);
                     }
                 }
                 catch { }
@@ -687,6 +721,7 @@ namespace ReportGenerator.ViewModels
                 MessageBox.Show($"Export failed:\n{ex.Message}");
             }
         }
+
         private static string Escape(object value)
         {
             if (value == null || value == DBNull.Value) return string.Empty;

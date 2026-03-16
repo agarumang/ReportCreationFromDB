@@ -12,12 +12,13 @@
             </Grid.ColumnDefinitions>
 
             <!-- Left: App icon from provided image -->
-            <Image Source="/ReportGenerator;component/Resources/FactoryLogo.png"
-                   Width="40"
-                   Height="40"
-                   Margin="10,0,8,0"
-                   VerticalAlignment="Center"
-                   Stretch="Uniform"/>
+            <Image
+                Width="40"
+                Height="40"
+                Margin="10,0,8,0"
+                VerticalAlignment="Center"
+                Stretch="Uniform"
+                Source="{Binding DataContext.LogoPath, RelativeSource={RelativeSource AncestorType=Window}, TargetNullValue=/ReportGenerator;component/Resources/FactoryLogo.png}" />
 
             <!-- Center: view/window title or selected table -->
             <TextBlock Grid.Column="1" Style="{StaticResource HeaderTitleText}" Text="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=Title, FallbackValue=''}"
