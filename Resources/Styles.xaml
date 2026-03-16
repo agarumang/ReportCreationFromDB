@@ -119,6 +119,11 @@
         </Style.Triggers>
     </Style>
 
+    <!-- Two-digit formatting for time dropdowns (00-59) -->
+    <DataTemplate x:Key="TwoDigitNumberTemplate">
+        <TextBlock Text="{Binding StringFormat={}{0:00}}"/>
+    </DataTemplate>
+
     <!-- DatePicker / Calendar readability (ensure text + padding are clear) -->
     <Style TargetType="DatePicker">
         <Setter Property="Foreground" Value="{StaticResource AccentTextBrush}"/>
@@ -130,8 +135,8 @@
         <Setter Property="VerticalContentAlignment" Value="Center"/>
     </Style>
     <Style TargetType="DatePickerTextBox">
-        <Setter Property="Padding" Value="8,0,6,0"/>
-        <Setter Property="Height" Value="28"/>
+        <Setter Property="Padding" Value="8,0,8,0"/>
+        <Setter Property="Height" Value="30"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Foreground" Value="{StaticResource AccentTextBrush}"/>
         <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
@@ -233,6 +238,70 @@
         <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
         <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
+    </Style>
+
+    <!-- Time "input box" (hour:mm) to match DatePicker look -->
+    <Style x:Key="TimePickerBox" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="6"/>
+        <Setter Property="Padding" Value="6,0"/>
+        <Setter Property="Height" Value="30"/>
+    </Style>
+
+    <Style x:Key="TimePickerCombo" TargetType="ComboBox">
+        <Setter Property="Height" Value="28"/>
+        <Setter Property="Padding" Value="0,2,0,2"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBox">
+                    <Grid SnapsToDevicePixels="True">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="14"/>
+                        </Grid.ColumnDefinitions>
+
+                        <ContentPresenter Grid.Column="0"
+                                          Margin="0"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          RecognizesAccessKey="True"/>
+
+                        <!-- Minimal drop-down arrow -->
+                        <ToggleButton Grid.Column="1"
+                                      Focusable="False"
+                                      IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                      ClickMode="Press"
+                                      Background="Transparent"
+                                      BorderThickness="0">
+                            <Path Data="M 0 0 L 4 4 L 8 0 Z"
+                                  Fill="{StaticResource MutedTextBrush}"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"/>
+                        </ToggleButton>
+
+                        <Popup IsOpen="{TemplateBinding IsDropDownOpen}"
+                               Placement="Bottom"
+                               AllowsTransparency="True"
+                               Focusable="False"
+                               PopupAnimation="Fade">
+                            <Border Background="{StaticResource SurfaceBrush}"
+                                    BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="1">
+                                <ScrollViewer Margin="0" SnapsToDevicePixels="True">
+                                    <StackPanel IsItemsHost="True" />
+                                </ScrollViewer>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- ListBox -->

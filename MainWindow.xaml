@@ -104,13 +104,35 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock Text="From:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <DatePicker SelectedDate="{Binding FromDate}" SelectedDateFormat="Short" Width="140" />
+                        <DatePicker SelectedDate="{Binding FromDate}" SelectedDateFormat="Short" Width="130" />
+                        <Border Style="{StaticResource TimePickerBox}" Margin="6,0,0,0">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <ComboBox Style="{StaticResource TimePickerCombo}" Width="32"
+                                         ItemsSource="{Binding Hours}" SelectedItem="{Binding FromHour}"
+                                         ItemTemplate="{StaticResource TwoDigitNumberTemplate}" />
+                                <TextBlock Text=":" Width="8" TextAlignment="Center" VerticalAlignment="Center" Margin="0" Foreground="{StaticResource MutedTextBrush}"/>
+                                <ComboBox Style="{StaticResource TimePickerCombo}" Width="32"
+                                         ItemsSource="{Binding Minutes}" SelectedItem="{Binding FromMinute}"
+                                         ItemTemplate="{StaticResource TwoDigitNumberTemplate}" />
+                            </StackPanel>
+                        </Border>
                         <TextBlock Text="To:" VerticalAlignment="Center" Margin="12,0,6,0"/>
-                        <DatePicker SelectedDate="{Binding ToDate}" SelectedDateFormat="Short" Width="140" />
-                        <Button Content="Refresh" Style="{StaticResource PrimaryButton}" Command="{Binding LoadDataBetweenDatesCommand}" Margin="12,0,8,0" />
-                    </StackPanel>
+                        <DatePicker SelectedDate="{Binding ToDate}" SelectedDateFormat="Short" Width="130" />
+                        <Border Style="{StaticResource TimePickerBox}" Margin="6,0,0,0">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <ComboBox Style="{StaticResource TimePickerCombo}" Width="32"
+                                         ItemsSource="{Binding Hours}" SelectedItem="{Binding ToHour}"
+                                         ItemTemplate="{StaticResource TwoDigitNumberTemplate}" />
+                                <TextBlock Text=":" Width="8" TextAlignment="Center" VerticalAlignment="Center" Margin="0" Foreground="{StaticResource MutedTextBrush}"/>
+                                <ComboBox Style="{StaticResource TimePickerCombo}" Width="32"
+                                         ItemsSource="{Binding Minutes}" SelectedItem="{Binding ToMinute}"
+                                         ItemTemplate="{StaticResource TwoDigitNumberTemplate}" />
+                            </StackPanel>
+                        </Border>
+                        <Button Content="Refresh" Style="{StaticResource PrimaryButton}" Command="{Binding LoadDataBetweenDatesCommand}" Margin="10,0,0,0" />
+                    </WrapPanel>
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
                         <TextBlock Text="Export as:" VerticalAlignment="Center" Margin="8,0,4,0"/>

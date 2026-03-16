@@ -1,4 +1,4 @@
-﻿using ClosedXML.Excel;
+using ClosedXML.Excel;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
@@ -32,6 +32,8 @@ namespace ReportGenerator.ViewModels
         public ObservableCollection<string> Tables { get; } = new ObservableCollection<string>();
         public ObservableCollection<ColumnItem> Columns { get; } = new ObservableCollection<ColumnItem>();
         public ObservableCollection<string> ExportFormats { get; } = new ObservableCollection<string> { "Excel", "CSV", "PDF" };
+        public ObservableCollection<int> Hours { get; } = new ObservableCollection<int>(Enumerable.Range(0, 24));
+        public ObservableCollection<int> Minutes { get; } = new ObservableCollection<int>(Enumerable.Range(0, 60));
 
         private string _selectedExportFormat = "Excel";
         public string SelectedExportFormat
@@ -52,6 +54,34 @@ namespace ReportGenerator.ViewModels
         {
             get => _toDate;
             set { if (_toDate == value) return; _toDate = value; OnPropertyChanged(nameof(ToDate)); }
+        }
+
+        private int _fromHour;
+        public int FromHour
+        {
+            get => _fromHour;
+            set { if (_fromHour == value) return; _fromHour = value; OnPropertyChanged(nameof(FromHour)); }
+        }
+
+        private int _fromMinute;
+        public int FromMinute
+        {
+            get => _fromMinute;
+            set { if (_fromMinute == value) return; _fromMinute = value; OnPropertyChanged(nameof(FromMinute)); }
+        }
+
+        private int _toHour = 23;
+        public int ToHour
+        {
+            get => _toHour;
+            set { if (_toHour == value) return; _toHour = value; OnPropertyChanged(nameof(ToHour)); }
+        }
+
+        private int _toMinute = 59;
+        public int ToMinute
+        {
+            get => _toMinute;
+            set { if (_toMinute == value) return; _toMinute = value; OnPropertyChanged(nameof(ToMinute)); }
         }
 
         private string _selectedTable;
@@ -114,6 +144,10 @@ namespace ReportGenerator.ViewModels
             // sensible defaults
             ToDate = DateTime.Today.AddDays(1).Date; // include today until end
             FromDate = DateTime.Today.AddDays(-7).Date;
+            FromHour = 0;
+            FromMinute = 0;
+            ToHour = 23;
+            ToMinute = 59;
         }
 
         // helper to show loader and block UI while the passed async action runs
@@ -261,9 +295,18 @@ namespace ReportGenerator.ViewModels
             {
                 try
                 {
-                    // Use exclusive upper bound: pass to = endDate.Date.AddDays(1)
-                    var from = FromDate.Value.Date;
-                    var toExclusive = ToDate.Value.Date.AddDays(1);
+                    // Use exclusive upper bound: [TimeStamp] >= from AND [TimeStamp] < toExclusive
+                    // Since UI captures up to minute precision, interpret "To" as inclusive of that minute
+                    // by adding one minute to make the upper bound exclusive.
+                    var from = FromDate.Value.Date
+                               .AddHours(FromHour)
+                               .AddMinutes(FromMinute);
+
+                    var toInclusiveMinute = ToDate.Value.Date
+                                            .AddHours(ToHour)
+                                            .AddMinutes(ToMinute);
+
+                    var toExclusive = toInclusiveMinute.AddMinutes(1);
 
                     // fetch all matching rows (no TOP)
                     var dt = await _db.GetColumnsDataBetweenDatesAsync(schema, table, selected, from, toExclusive);
@@ -449,8 +492,12 @@ namespace ReportGenerator.ViewModels
                                       .FontSize(18)
                                       .Bold();
 
-                                string startDate = FromDate?.ToString("dd-MMM-yyyy") ?? "N/A";
-                                string endDate = ToDate?.ToString("dd-MMM-yyyy") ?? "N/A";
+                                string startDate = FromDate.HasValue
+                                    ? FromDate.Value.Date.AddHours(FromHour).AddMinutes(FromMinute).ToString("dd-MMM-yyyy HH:mm")
+                                    : "N/A";
+                                string endDate = ToDate.HasValue
+                                    ? ToDate.Value.Date.AddHours(ToHour).AddMinutes(ToMinute).ToString("dd-MMM-yyyy HH:mm")
+                                    : "N/A";
 
                                 header.Item()
                                       .AlignCenter()
@@ -598,6 +645,12 @@ namespace ReportGenerator.ViewModels
                     }
                 });
 
+                if (!File.Exists(filePath))
+                {
+                    MessageBox.Show("Export failed: file was not created.", "Export", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
                 var exportedCount = table.Rows.Count;
                 MessageBox.Show($"Export complete. {exportedCount} records exported to:{Environment.NewLine}{filePath}", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
             }
@@ -627,7 +680,7 @@ namespace ReportGenerator.ViewModels
                     return;
 
                 string filePath = dlg.FileName;
-                var table = Results.Table;
+                var table = Results.Table.Copy(); // thread-safe snapshot
 
                 await Task.Run(() =>
                 {
@@ -708,6 +761,12 @@ namespace ReportGenerator.ViewModels
                         workbookPart.Workbook.Save();
                     }
                 });
+
+                if (!File.Exists(filePath))
+                {
+                    MessageBox.Show("Export failed: file was not created.", "Export", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
 
                 var exportedCount = table.Rows.Count;
                 MessageBox.Show($"Export complete. {exportedCount} records exported to:{Environment.NewLine}{filePath}", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
